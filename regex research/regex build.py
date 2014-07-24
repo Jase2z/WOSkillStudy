@@ -1,6 +1,7 @@
 from datetime import datetime
 import csv
 import re
+import sqlite3 as sql
 
 skill_path = 'C:/Users/Jason/Documents/wurm/players/joedobo/logs/_Skills.2014-03.txt'
 event_path = 'C:/Users/Jason/Documents/wurm/players/joedobo/logs/_Event.2014-03.txt'
@@ -97,29 +98,39 @@ def time_stamp(arg1):
     return None, _time_part
 
 
-def get_regex():
+def get_regex(sql_arg):
     regex_list = list()
+    try:
+        sql_arg.execute('''CREATE TABLE regex_look(regex TEXT, outcome TEXT)''')
+    except sql.Error as e:
+        pass
     with open("regex.csv", encoding='utf-8', newline='') as fp:
-        csv_reader = csv.reader(fp, quoting=csv.QUOTE_NONE)
+        csv_reader = csv.reader(fp)
         # b'\xe2\x99\xa0' = ♠ for utf-8
         for row in csv_reader:
-            regex_list.append(row[0])
-        #print(regex_list)
-    return regex_list
+            sql_arg.execute('INSERT into regex_look VALUES (?,?)', (row[0], row[1]))
+            #print(row)
+    return sql_arg
 
 
-regex = get_regex()
 sk = SkillLogTimeStamps(skill_path)
 ev = EventLog(event_path)
+
+con = sql.connect(":memory:")
+con.isolation_level = None
+
+get_regex(con)
+
 for _ in sk:
     ev.match_time = sk.datetime_list[1]
     next(ev)
     found = False
     for i in ev.line_list:
-        for i1 in regex:
-            result = re.search(i1, i)
-            if result is not None:
-                #print(i)
-                found = True
+        with con:
+            for row in con.execute('''SELECT regex, outcome FROM regex_look'''):
+                result = re.search(row[0], i)
+                if result is not None:
+                    #print(i)
+                    found = True
     if found is False:
         print('no match', sk.datetime_list[1])
