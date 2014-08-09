@@ -21,6 +21,9 @@ class SkillLogTimeStamps:
 
     def __next__(self):
         with open(self.skill_log_path, encoding='utf-8') as fp:
+            fp.seek(0, 2)
+            if fp.tell() == self.log_position[0]:
+                raise StopIteration
             fp.seek(self.log_position[0])
             self.line_list = list()
             for line in iter(fp.readline, ''):
@@ -42,7 +45,6 @@ class SkillLogTimeStamps:
                 else:
                     self.log_position = self.log_position[1:]
                 break
-        #raise StopIteration
     pass
 
 
@@ -52,8 +54,9 @@ class EventLog:
         self.log_position = [0, 0]
         self.time_part = datetime.min.time()
         self.date_part = datetime.min.date()
-        self.datetime_list = [datetime.min, datetime.min]
+        self.datetime_whole = datetime
         self.match_time = datetime.min
+        self.line_list = list()
 
     def __iter__(self):
         return self
@@ -61,7 +64,6 @@ class EventLog:
     def __next__(self):
         with open(self.event_log_path, encoding='utf-8') as fp:
             fp.seek(self.log_position[0])
-            self.line_list = list()
             for line in iter(fp.readline, ''):
                 self.log_position.insert(0, fp.tell())
                 self.log_position = self.log_position[:2]
@@ -75,8 +77,9 @@ class EventLog:
                     self.time_part = time1
                 if self.date_part.year == 1:
                     continue
-                if self.match_time >= datetime.combine(self.date_part, self.time_part):
-                    self.line_list.insert(0, line)
+                self.datetime_whole = datetime.combine(self.date_part, self.time_part)
+                if self.match_time >= self.datetime_whole:
+                    self.line_list.insert(0, [self.datetime_whole, line])
                 if self.match_time < datetime.combine(self.date_part, self.time_part):
                     self.log_position[0] = self.log_position[1]
                     break
@@ -99,38 +102,55 @@ def time_stamp(arg1):
 
 
 def get_regex(sql_arg):
-    regex_list = list()
     try:
         sql_arg.execute('''CREATE TABLE regex_look(regex TEXT, outcome TEXT)''')
-    except sql.Error as e:
+    except sql.Error:
         pass
     with open("regex.csv", encoding='utf-8', newline='') as fp:
         csv_reader = csv.reader(fp)
         # b'\xe2\x99\xa0' = ♠ for utf-8
-        for row in csv_reader:
-            sql_arg.execute('INSERT into regex_look VALUES (?,?)', (row[0], row[1]))
-            #print(row)
+        for entries in csv_reader:
+            sql_arg.execute('INSERT into regex_look VALUES (?,?)', (entries[0], entries[1]))
+            #print(entries)
     return sql_arg
 
 
 sk = SkillLogTimeStamps(skill_path)
 ev = EventLog(event_path)
 
-con = sql.connect(":memory:")
+con = sql.connect("regex.sqlite")
 con.isolation_level = None
 
 get_regex(con)
 
+
 for _ in sk:
+    regex_matches = []
     ev.match_time = sk.datetime_list[1]
     next(ev)
     found = False
-    for i in ev.line_list:
+    with open('log.txt', mode='at') as fp:
+        fp.write('\n{}\n'.format(repr(sk.line_list)), )
+
+    index = 0
+    for i in ev.line_list[:]:
+        found = False
         with con:
             for row in con.execute('''SELECT regex, outcome FROM regex_look'''):
-                result = re.search(row[0], i)
+                result = re.search(row[0], i[1])
                 if result is not None:
-                    #print(i)
                     found = True
-    if found is False:
-        print('no match', sk.datetime_list[1])
+                    if row[1] == 'start' and i[0] == ev.match_time:
+                        index += 1
+                        break
+                    #print('line: {}\nsearch: {}'.format(i, row))
+                    regex_matches.insert(0, 'line: {}\nsearch: {}\n'.format(i, repr(row)))
+                    ev.line_list.pop(index)
+                    break
+        if found is False:
+            ev.line_list.pop(index)
+    else:
+        pass
+    with open('log.txt', mode='at') as fp:
+        for i in regex_matches:
+            fp.write('{}'.format(i))
