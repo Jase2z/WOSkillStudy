@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import csv
 import re
 import sqlite3 as sql
 
 skill_path = 'C:/Users/Jason/Documents/wurm/players/joedobo/logs/_Skills.2014-03.txt'
 event_path = 'C:/Users/Jason/Documents/wurm/players/joedobo/logs/_Event.2014-03.txt'
+start_date = datetime(2014, 3, 1, 11, 57, 59)
+end_date = datetime.max
 
 
 class SkillLogTimeStamps:
@@ -39,7 +41,9 @@ class SkillLogTimeStamps:
                 if self.date_part.year == 1:
                     continue
                 self.datetime_list.insert(0, datetime.combine(self.date_part, self.time_part))
-                if self.datetime_list[1] == self.datetime_list[0] or self.datetime_list[1] == datetime.min:
+                if self.datetime_list[1] == self.datetime_list[0] \
+                        or self.datetime_list[0] == self.datetime_list[1] + timedelta(seconds=1) \
+                        or self.datetime_list[1] == datetime.min:
                     self.line_list.insert(0, line)
                     continue
                 else:
@@ -125,12 +129,19 @@ get_regex(con)
 
 
 for _ in sk:
+    if sk.datetime_list[1] > end_date:
+        break
+    start_match = False
+    success_match = False
+    failure_match = False
     regex_matches = []
-    ev.match_time = sk.datetime_list[1]
+    regex_matches.insert(0, '{}\n\n'.format(repr(sk.line_list)))
+    ev.match_time = sk.datetime_list[1] + timedelta(seconds=1)
     next(ev)
+    if sk.datetime_list[1] < start_date:
+        ev.line_list = []
+        continue
     found = False
-    with open('log.txt', mode='at') as fp:
-        fp.write('\n{}\n'.format(repr(sk.line_list)), )
 
     index = 0
     for i in ev.line_list[:]:
@@ -140,7 +151,13 @@ for _ in sk:
                 result = re.search(row[0], i[1])
                 if result is not None:
                     found = True
-                    if row[1] == 'start' and i[0] == ev.match_time:
+                    if row[1] == 'start':
+                        start_match = True
+                    if row[1] == 'success':
+                        success_match = True
+                    if row[1] == 'failure':
+                        failure_match = True
+                    if row[1] == 'start' and (i[0] == ev.match_time or i[0] == ev.match_time + timedelta(seconds=1)):
                         index += 1
                         break
                     #print('line: {}\nsearch: {}'.format(i, row))
@@ -151,6 +168,13 @@ for _ in sk:
             ev.line_list.pop(index)
     else:
         pass
-    with open('log.txt', mode='at') as fp:
-        for i in regex_matches:
-            fp.write('{}'.format(i))
+    if (success_match is False and failure_match is False) or start_match is False:
+        with open('log1.txt', mode='at') as fp:
+            for i in regex_matches:
+                fp.write('{}'.format(i))
+    else:
+        with open('log.txt', mode='at') as fp:
+            for i in regex_matches:
+                fp.write('{}'.format(i))
+
+

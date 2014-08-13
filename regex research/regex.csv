@@ -6,7 +6,6 @@
 "The ([A-Za-z ]+) will probably give birth in a while!","success"
 "You almost made it, but the plank is damaged.","failure"
 "You attach the ([A-Za-z ]+) to the ([A-Za-z ]+).","success"
-"You attach the lock and lock the door.","success"
 "You butcher the corpse of ([A-Za-z ]+).","success"
 "You continue to build a ([A-Za-z ]+).","start"
 "You create a ([A-Za-z ]+) in front of you on the ground.","success"
@@ -29,3 +28,5 @@
 "You will want to polish the ([A-Za-z ]+) with a pelt before you improve it.","success"
 "The ([A-Za-z ]+) has some dents that must be flattened by a hammer.","success"
 "You start to build ([A-Za-z ]+).","start"
+"You start to attach the lock.","start"
+"You attach the lock and lock the door.","success"
