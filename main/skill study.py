@@ -114,8 +114,11 @@ def get_regex(sql_arg):
         csv_reader = csv.reader(fp)
         # b'\xe2\x99\xa0' = ♠ for utf-8
         for entries in csv_reader:
-            sql_arg.execute('INSERT into regex_look VALUES (?,?)', (entries[0], entries[1]))
-            #print(entries)
+            a = sum(len(i) for i in sql_arg.execute('SELECT * FROM regex_look WHERE regex=? and outcome=?',
+                                                    (entries[0], entries[1])))  # Are the entries-csv values in DB?
+            if a == 0:
+                # Generator will result in 0 if entries-csv values are absent.
+                sql_arg.execute('INSERT into regex_look VALUES (?,?)', (entries[0], entries[1]))
     return sql_arg
 
 
@@ -126,53 +129,3 @@ con = sql.connect("regex.sqlite")
 con.isolation_level = None
 
 get_regex(con)
-
-
-for _ in sk:
-    if sk.datetime_list[1] > end_date:
-        break
-    start_match = False
-    success_match = False
-    failure_match = False
-    regex_matches = []
-    regex_matches.insert(0, '{}\n\n'.format(repr(sk.line_list)))
-    ev.match_time = sk.datetime_list[1] + timedelta(seconds=1)
-    next(ev)
-    if sk.datetime_list[1] < start_date:
-        ev.line_list = []
-        continue
-    found = False
-
-    index = 0
-    for i in ev.line_list[:]:
-        found = False
-        with con:
-            for row in con.execute('''SELECT regex, outcome FROM regex_look'''):
-                result = re.search(row[0], i[1])
-                if result is not None:
-                    found = True
-                    if row[1] == 'start':
-                        start_match = True
-                    if row[1] == 'success':
-                        success_match = True
-                    if row[1] == 'failure':
-                        failure_match = True
-                    if row[1] == 'start' and (i[0] == ev.match_time or i[0] == ev.match_time + timedelta(seconds=1)):
-                        index += 1
-                        break
-                    #print('line: {}\nsearch: {}'.format(i, row))
-                    regex_matches.insert(0, 'line: {}\nsearch: {}\n'.format(i, repr(row)))
-                    ev.line_list.pop(index)
-                    break
-        if found is False:
-            ev.line_list.pop(index)
-    else:
-        pass
-    if (success_match is False and failure_match is False) or start_match is False:
-        with open('log1.txt', mode='at') as fp:
-            for i in regex_matches:
-                fp.write('{}'.format(i))
-    else:
-        with open('log.txt', mode='at') as fp:
-            for i in regex_matches:
-                fp.write('{}'.format(i))
