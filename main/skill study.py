@@ -3,11 +3,6 @@ import csv
 import re
 import sqlite3 as sql
 
-skill_path = 'C:/Users/Jason/Documents/wurm/players/joedobo/logs/_Skills.2014-03.txt'
-event_path = 'C:/Users/Jason/Documents/wurm/players/joedobo/logs/_Event.2014-03.txt'
-start_date = datetime(2014, 3, 1, 11, 57, 59)
-end_date = datetime.max
-
 
 class SkillLogTimeStamps:
     def __init__(self, skill_log_path):
@@ -121,6 +116,23 @@ def get_regex(sql_arg):
                 sql_arg.execute('INSERT into regex_look VALUES (?,?)', (entries[0], entries[1]))
     return sql_arg
 
+
+def text_to_csv_generator(file):
+    with open(file) as csvfile:
+        dialect = csv.Sniffer().sniff(csvfile.read(1024))
+        csvfile.seek(0)
+        csv_reader = csv.reader(csvfile, dialect)
+        for row in csv_reader:
+            yield row
+
+
+a = text_to_csv_generator('my data.txt')
+for entry in a:
+    exec('{} = "{}"'.format(entry[0], entry[1]))
+start_date = eval(start_date)
+end_date = eval(end_date)
+
+print(end_date, type(end_date))
 
 sk = SkillLogTimeStamps(skill_path)
 ev = EventLog(event_path)
