@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 import csv
 import re
+
+
 import sqlite3 as sql
 
 
@@ -48,17 +50,37 @@ class SkillLogTimeStamps:
 
 
 class EventLog:
-    def __init__(self, event_log_path):
+    def __init__(self, event_log_path, start_date):
         self.event_log_path = event_log_path
-        self.log_position = [0, 0]
+        self.log_position = list()
+        self.log_position[0] = self.get_log_position()
         self.time_part = datetime.min.time()
         self.date_part = datetime.min.date()
         self.datetime_whole = datetime
-        self.match_time = datetime.min
         self.line_list = list()
+        self.start_date = start_date
 
     def __iter__(self):
         return self
+
+    def get_log_position(self):
+        with open(self.event_log_path, encoding='utf-8') as fp:
+            for line in iter(fp.readline, ''):
+                self.log_position.insert(0, fp.tell())
+                self.log_position = self.log_position[:2]
+                line = line.strip()
+                date1, time1 = time_stamp(line)
+                print(date1, time1)
+                if date1 is not None:
+                    self.date_part = date1
+                    continue
+                if time1 is not None:
+                    self.time_part = time1
+                if self.date_part.year == 1:
+                    continue
+                self.datetime_whole = datetime.combine(self.date_part, self.time_part)
+                if self.start_date == self.datetime_whole:
+                    return self.log_position[1]
 
     def __next__(self):
         with open(self.event_log_path, encoding='utf-8') as fp:
@@ -82,6 +104,7 @@ class EventLog:
                 if self.match_time < datetime.combine(self.date_part, self.time_part):
                     self.log_position[0] = self.log_position[1]
                     break
+    pass
 
 
 def time_stamp(arg1):
@@ -109,33 +132,37 @@ def get_regex(sql_arg):
         csv_reader = csv.reader(fp)
         # b'\xe2\x99\xa0' = ♠ for utf-8
         for entries in csv_reader:
-            a = sum(len(i) for i in sql_arg.execute('SELECT * FROM regex_look WHERE regex=? and outcome=?',
-                                                    (entries[0], entries[1])))  # Are the entries-csv values in DB?
-            if a == 0:
+            entry_present = sum(len(i) for i in sql_arg.execute('SELECT * FROM regex_look WHERE regex=? and outcome=?',
+                                                                (entries[0], entries[1])))  
+                                                                # Are the entries-csv values in DB?
+            if entry_present == 0:
                 # Generator will result in 0 if entries-csv values are absent.
                 sql_arg.execute('INSERT into regex_look VALUES (?,?)', (entries[0], entries[1]))
     return sql_arg
 
 
-def text_to_csv_generator(file):
+def csv_import_generator(file):
     with open(file) as csvfile:
         dialect = csv.Sniffer().sniff(csvfile.read(1024))
         csvfile.seek(0)
         csv_reader = csv.reader(csvfile, dialect)
         for row in csv_reader:
+            print(type(row))
             yield row
 
 
-a = text_to_csv_generator('my data.txt')
+start_date = end_date = skill_path = event_path = str()
+a = csv_import_generator('my data.txt')
 for entry in a:
     exec('{} = "{}"'.format(entry[0], entry[1]))
 start_date = eval(start_date)
 end_date = eval(end_date)
 
-print(end_date, type(end_date))
+#print(end_date, type(end_date))
 
 sk = SkillLogTimeStamps(skill_path)
-ev = EventLog(event_path)
+ev = EventLog(event_path, start_date)
+print(ev.datetime_whole)
 
 con = sql.connect("regex.sqlite")
 con.isolation_level = None
