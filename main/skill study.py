@@ -6,91 +6,47 @@ import sqlite3 as sql
 Line = namedtuple('Line', ['time', 'line'])
 
 
-class SkillLog:
-    def __init__(self, skill_log_path):
-        self.iter_counter = 1
-        self.skill_log_path = skill_log_path
-        self.log_position = [0]
-        self.time_part = datetime.min.time()
-        self.date_part = datetime.min.date()
-        self.datetime_list = [datetime.min, datetime.min]
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        with open(self.skill_log_path, encoding='utf-8') as fp:
-            fp.seek(0, 2)
-            if fp.tell() == self.log_position[0]:
-                raise StopIteration
-            fp.seek(self.log_position[0])
-            self.line_list = list()
-            for line in iter(fp.readline, ''):
-                self.log_position.insert(0, fp.tell())
-                self.log_position = self.log_position[:2]
-                line = line.strip()
-                date1, time1 = time_stamp(line)
-                if date1 is not None:
-                    self.date_part = date1
-                    continue
-                if time1 is not None:
-                    self.time_part = time1
-                if self.date_part.year == 1:
-                    continue
-                self.datetime_list.insert(0, datetime.combine(self.date_part, self.time_part))
-                if self.datetime_list[1] == self.datetime_list[0] \
-                        or self.datetime_list[0] == self.datetime_list[1] + timedelta(seconds=1) \
-                        or self.datetime_list[1] == datetime.min:
-                    self.line_list.insert(0, line)
-                    continue
-                else:
-                    self.log_position = self.log_position[1:]
-                break
-    pass
-
-
-class EventLog:
-    def __init__(self, event_log_path, _start_date):
-        self.event_log_path = event_log_path
+class LogFile:
+    def __init__(self, log_path, fetch):
+        self.fetch_count = fetch
+        self.log_path = log_path
         self.time_part = datetime.min.time()
         self.date_part = datetime.min.date()
         self.datetime_whole = datetime
         self.line_list = list()
-        self.start_date = _start_date
-        self.log_position = list()
-        self.log_position[0] = self.get_log_position()
+        self.start_date = ud.start_date
+        self.log_position = self.get_log_position()
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        lines_counter = 20
-        with open(self.event_log_path, encoding='utf-8') as fp:
-            fp.seek(self.log_position[0])
-            for line in iter(fp.readline, ''):
-                self.log_position[0] = fp.tell()
-                line = line.strip()
-                date1, time1 = time_stamp(line)
+        lines_counter = self.fetch_count
+        with open(self.log_path, encoding='utf-8') as _fp:
+            _fp.seek(self.log_position)
+            for _line in iter(_fp.readline, ''):
+                self.log_position = _fp.tell()
+                _line = _line.strip()
+                date1, time1 = time_stamp(_line)
                 if date1 is not None:
                     self.date_part = date1
                     continue
                 if time1 is not None:
                     self.time_part = time1
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
-                self.line_list.append(Line(self.datetime_whole, line[11:]))
-                #print('tell: {}'.format(self.log_position))
-                #print(self.line_list[20 - lines_counter])
+                self.line_list.append(Line(self.datetime_whole, _line[11:]))
                 lines_counter -= 1
                 if lines_counter <= 0:
                     break
 
     def get_log_position(self):
-        with open(self.event_log_path, encoding='utf-8') as fp:
-            for line in iter(fp.readline, ''):
-                self.log_position.insert(0, fp.tell())
-                self.log_position = self.log_position[:2]
-                line = line.strip()
-                date1, time1 = time_stamp(line)
+        _log_position = list()
+        with open(self.log_path, encoding='utf-8') as _fp:
+            for _line in iter(_fp.readline, ''):
+                _log_position.insert(0, _fp.tell())
+                _log_position = _log_position[:2]
+                _line = _line.strip()
+                date1, time1 = time_stamp(_line)
                 if date1 is not None:
                     self.date_part = date1
                     continue
@@ -99,8 +55,8 @@ class EventLog:
                 if self.date_part.year == 1:
                     continue
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
-                if self.start_date == self.datetime_whole:
-                    return self.log_position[1]
+                if self.start_date <= self.datetime_whole:
+                    return _log_position[1]
 
     def line_consumer(self, line_count):
         for _ in range(line_count):
@@ -108,14 +64,14 @@ class EventLog:
                 _line = self.line_list.pop(0)
             except IndexError:
                 raise StopIteration
-            yield _line
+            return _line
 
     pass
 
 
 class UserData:
     def __init__(self, file):
-        self.skill_path, self.event_path, self.start_date, self.end_date = self.fetch_my_data(file)
+        self.skill_path, self.event_path, self.start_date, self.end_date = fetch_my_data(file)
         if type(eval(self.start_date)) is datetime:
             self.start_date = eval(self.start_date)
         else:
@@ -125,14 +81,15 @@ class UserData:
         else:
             raise ValueError
 
-    @staticmethod
-    def fetch_my_data(file):
-        user_dict = {}
-        _a = csv_import_generator(file)
-        for row in _a:
-            user_dict[row[0]] = row[1]
-        return user_dict["skill_path"], user_dict["event_path"], user_dict["start_date"], user_dict["end_date"]
     pass
+
+
+def fetch_my_data(file):
+    user_dict = {}
+    _csv = csv_import_generator(file)
+    for _row in _csv:
+        user_dict[_row[0]] = _row[1]
+    return user_dict["skill_path"], user_dict["event_path"], user_dict["start_date"], user_dict["end_date"]
 
 
 def time_stamp(arg1):
@@ -180,10 +137,18 @@ def csv_import_generator(file):
 
 
 ud = UserData('my data.txt')
-sk = SkillLog(ud.skill_path)
-ev = EventLog(ud.event_path, ud.start_date)
+
+sk = LogFile(ud.skill_path, 50)
+ev = LogFile(ud.event_path, 50)
 
 con = sql.connect("regex.sqlite")
 con.isolation_level = None
 
 get_regex(con)
+
+next(sk)
+for line in sk.line_list:
+    print(line)
+next(ev)
+for line in ev.line_list:
+    print(line)
