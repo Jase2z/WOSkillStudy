@@ -7,8 +7,7 @@ Line = namedtuple('Line', ['time', 'line'])
 
 
 class LogFile:
-    def __init__(self, log_path, fetch):
-        self.fetch_count = fetch
+    def __init__(self, log_path):
         self.log_path = log_path
         self.time_part = datetime.min.time()
         self.date_part = datetime.min.date()
@@ -18,10 +17,9 @@ class LogFile:
         self.log_position = self.get_log_position()
 
     def __iter__(self):
-        return self
+        return
 
-    def __next__(self):
-        lines_counter = self.fetch_count
+    def __next__(self, _count=50):
         with open(self.log_path, encoding='utf-8') as _fp:
             _fp.seek(self.log_position)
             for _line in iter(_fp.readline, ''):
@@ -35,8 +33,8 @@ class LogFile:
                     self.time_part = time1
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
                 self.line_list.append(Line(self.datetime_whole, _line[11:]))
-                lines_counter -= 1
-                if lines_counter <= 0:
+                _count -= 1
+                if _count <= 0:
                     break
 
     def get_log_position(self):
@@ -58,13 +56,15 @@ class LogFile:
                 if self.start_date <= self.datetime_whole:
                     return _log_position[1]
 
-    def line_consumer(self, line_count):
+    def line_consumer(self, line_count=0):
+        if len(self.line_list) < line_count:
+            line_count = len(self.line_list)
         for _ in range(line_count):
             try:
                 _line = self.line_list.pop(0)
             except IndexError:
                 raise StopIteration
-            return _line
+            yield _line
 
     pass
 
@@ -82,6 +82,23 @@ class UserData:
             raise ValueError
 
     pass
+
+
+class Skill:
+    def __init__(self):
+        self.found_times = dict()
+
+    def group_same_times(self, _line_cnt, _log_class):
+        """
+
+        :param _log_class: LogFile
+        :param _line: int
+        """
+        for _line in _log_class.line_consumer(_line_cnt):
+            if _line.time in self.found_times:
+                self.found_times[_line.time].append(_line.line)
+            else:
+                self.found_times[_line.time] = [_line.line]
 
 
 def fetch_my_data(file):
@@ -137,18 +154,15 @@ def csv_import_generator(file):
 
 
 ud = UserData('my data.txt')
+sk_log = LogFile(ud.skill_path)
+ev_log = LogFile(ud.event_path)
+sk_data = Skill()
 
-sk = LogFile(ud.skill_path, 50)
-ev = LogFile(ud.event_path, 50)
 
 con = sql.connect("regex.sqlite")
 con.isolation_level = None
 
 get_regex(con)
 
-next(sk)
-for line in sk.line_list:
-    print(line)
-next(ev)
-for line in ev.line_list:
-    print(line)
+sk_log.__next__(50)
+sk_data.group_same_times(50, sk_log)
