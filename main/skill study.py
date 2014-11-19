@@ -2,8 +2,7 @@ from datetime import datetime, timedelta
 from collections import namedtuple
 import csv
 import sqlite3 as sql
-
-Line = namedtuple('Line', ['time', 'line'])
+import re
 
 
 class LogFile:
@@ -15,6 +14,7 @@ class LogFile:
         self.line_list = list()
         self.start_date = ud.start_date
         self.log_position = self.get_log_position()
+        self.Line = namedtuple('Line', ['time', 'line'])
 
     def __iter__(self):
         return
@@ -32,7 +32,7 @@ class LogFile:
                 if time1 is not None:
                     self.time_part = time1
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
-                self.line_list.append(Line(self.datetime_whole, _line[11:]))
+                self.line_list.append(self.Line(self.datetime_whole, _line[11:]))
                 _count -= 1
                 if _count <= 0:
                     break
@@ -92,13 +92,40 @@ class Skill:
         """
 
         :param _log_class: LogFile
-        :param _line: int
+        :param _line_cnt: int
         """
         for _line in _log_class.line_consumer(_line_cnt):
             if _line.time in self.found_times:
                 self.found_times[_line.time].append(_line.line)
             else:
                 self.found_times[_line.time] = [_line.line]
+    pass
+
+
+class Event:
+    def __init__(self):
+        self.line_matches = list()
+        self.Line = namedtuple('Line', ['time', 'line', 'tool', 'target'])
+
+    def line_matcher(self, _line_cnt, _log_class, _sql_con):
+        """
+
+        :param _line_cnt: int
+        :param _log_class: LogFile
+        :param _sql_con: sql.connect
+        """
+        for _line in _log_class.line_consumer(_line_cnt):
+            with _sql_con:
+                for _row in _sql_con.execute('SELECT * FROM REGEX_LOOK'):
+                    result = re.search(_row[0], _line.line)
+                    if result:
+                        break
+                if result:
+
+                    self.line_matches.append(self.Line(time=_line.time, line=_line.line))
+                    print(result.groups(), result.group(0), result.group(1), result.group(2))
+
+    pass
 
 
 def fetch_my_data(file):
@@ -157,6 +184,7 @@ ud = UserData('my data.txt')
 sk_log = LogFile(ud.skill_path)
 ev_log = LogFile(ud.event_path)
 sk_data = Skill()
+ev_data = Event()
 
 
 con = sql.connect("regex.sqlite")
@@ -166,3 +194,7 @@ get_regex(con)
 
 sk_log.__next__(50)
 sk_data.group_same_times(50, sk_log)
+
+ev_log.__next__(75)
+
+ev_data.line_matcher(50, ev_log, con)
