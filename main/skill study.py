@@ -3,6 +3,7 @@ from collections import namedtuple
 import csv
 import sqlite3 as sql
 import re
+import hashlib
 
 
 class LogFile:
@@ -121,9 +122,8 @@ class Event:
                     if result:
                         break
                 if result:
-
-                    self.line_matches.append(self.Line(time=_line.time, line=_line.line))
-                    print(result.groups(), result.group(0), result.group(1), result.group(2))
+                    self.line_matches.append(self.Line(time=_line.time, line=_line.line, tool="", target=""))
+                    print(result.groups(), _row[0])
 
     pass
 
@@ -180,6 +180,17 @@ def csv_import_generator(file):
             yield row
 
 
+def hash_regex(sql_con):
+    """
+
+    :param sql_con: sql.connect
+    """
+    with sql_con:
+        for row in sql_con.execute('SELECT regex FROM regex_look'):
+            with open('hashed regex.txt', mode='a', encoding='utf-8', newline='') as f:
+                f.write('{}\r\n'.format(hashlib.md5(row[0].encode()).hexdigest()))
+
+
 ud = UserData('my data.txt')
 sk_log = LogFile(ud.skill_path)
 ev_log = LogFile(ud.event_path)
@@ -196,5 +207,4 @@ sk_log.__next__(50)
 sk_data.group_same_times(50, sk_log)
 
 ev_log.__next__(75)
-
 ev_data.line_matcher(50, ev_log, con)
