@@ -88,6 +88,8 @@ class UserData:
 class Skill:
     def __init__(self):
         self.found_times = dict()
+        self.sk_values = tuple()
+        self.Line_Values = namedtuple('Line_Values', ['skill', 'gain', 'level', 'line'])
 
     def group_same_times(self, _line_cnt, _log_class):
         """
@@ -96,10 +98,16 @@ class Skill:
         :param _line_cnt: int
         """
         for _line in _log_class.line_consumer(_line_cnt):
+            result = re.search('([a-zA-Z]+) increased by ([.0-9]+) to ([.0-9]+)', _line.line)
+            if result:
+                self.sk_values = self.Line_Values(result.group(1), float(result.group(2)), float(result.group(3))
+                                                  , _line.line)
+            if not result:
+                raise ValueError
             if _line.time in self.found_times:
-                self.found_times[_line.time].append(_line.line)
+                self.found_times[_line.time].append(self.sk_values)
             else:
-                self.found_times[_line.time] = [_line.line]
+                self.found_times[_line.time] = [self.sk_values]
     pass
 
 
@@ -205,6 +213,9 @@ get_regex(con)
 
 sk_log.__next__(50)
 sk_data.group_same_times(50, sk_log)
+
+for i in sk_data.found_times:
+    print(sk_data.found_times[i])
 
 ev_log.__next__(75)
 ev_data.line_matcher(50, ev_log, con)
