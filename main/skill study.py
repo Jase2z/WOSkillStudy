@@ -1,19 +1,26 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import namedtuple
 import csv
 import sqlite3 as sql
 import re
 import hashlib
+from pathlib import WindowsPath as Path
 
 
 class LogFile:
-    def __init__(self, log_path):
-        self.log_path = log_path
+    def __init__(self, ud_obj, path):
+        """
+
+        :param ud_obj: UserData
+        :param path: Path
+        """
+        self.ud_obj = ud_obj
+        self.Path = path
         self.time_part = datetime.min.time()
         self.date_part = datetime.min.date()
         self.datetime_whole = datetime
         self.line_list = list()
-        self.start_date = ud.start_date
+        self.start_date = ud_obj.start_date
         self.log_position = self.get_log_position()
         self.Line = namedtuple('Line', ['time', 'line'])
 
@@ -21,7 +28,7 @@ class LogFile:
         return
 
     def __next__(self, _count=50):
-        with open(self.log_path, encoding='utf-8') as _fp:
+        with self.Path.open(encoding='utf-8') as _fp:
             _fp.seek(self.log_position)
             for _line in iter(_fp.readline, ''):
                 self.log_position = _fp.tell()
@@ -40,7 +47,7 @@ class LogFile:
 
     def get_log_position(self):
         _log_position = list()
-        with open(self.log_path, encoding='utf-8') as _fp:
+        with self.Path.open(encoding='utf-8') as _fp:
             for _line in iter(_fp.readline, ''):
                 _log_position.insert(0, _fp.tell())
                 _log_position = _log_position[:2]
@@ -72,13 +79,28 @@ class LogFile:
 
 class UserData:
     def __init__(self, file):
-        self.skill_path, self.event_path, self.start_date, self.end_date = fetch_my_data(file)
-        if type(eval(self.start_date)) is datetime:
-            self.start_date = eval(self.start_date)
+        """
+
+        :param file: str
+        :raise ValueError:
+        """
+        self.Data = namedtuple('Data', 'skill, event, start, end')
+        d = next(map(self.Data._make, csv.reader(open(file))))
+        print(d)
+        if Path(d.event).exists():
+            self.event_path = Path(d.event)
         else:
             raise ValueError
-        if type(eval(self.end_date)) is datetime:
-            self.end_date = eval(self.end_date)
+        if Path(d.skill).exists():
+            self.skill_path = Path(d.skill)
+        else:
+            raise ValueError
+        if type(eval(d.start)) is datetime:
+            self.start_date = eval(d.start)
+        else:
+            raise ValueError
+        if type(eval(d.end)) is datetime:
+            self.end_date = eval(d.end)
         else:
             raise ValueError
 
@@ -100,8 +122,8 @@ class Skill:
         for _line in _log_class.line_consumer(_line_cnt):
             result = re.search('([a-zA-Z]+) increased by ([.0-9]+) to ([.0-9]+)', _line.line)
             if result:
-                self.sk_values = self.Line_Values(result.group(1), float(result.group(2)), float(result.group(3))
-                                                  , _line.line)
+                self.sk_values = self.Line_Values(result.group(1), float(result.group(2)), float(result.group(3)),
+                                                  _line.line)
             if not result:
                 raise ValueError
             if _line.time in self.found_times:
@@ -128,20 +150,10 @@ class Event:
                 for _row in _sql_con.execute('SELECT * FROM REGEX_LOOK'):
                     result = re.search(_row[0], _line.line)
                     if result:
+                        self.line_matches.append(self.Line(time=_line.time, line=_line.line, tool="", target=""))
                         break
-                if result:
-                    self.line_matches.append(self.Line(time=_line.time, line=_line.line, tool="", target=""))
-                    print(result.groups(), _row[0])
 
     pass
-
-
-def fetch_my_data(file):
-    user_dict = {}
-    _csv = csv_import_generator(file)
-    for _row in _csv:
-        user_dict[_row[0]] = _row[1]
-    return user_dict["skill_path"], user_dict["event_path"], user_dict["start_date"], user_dict["end_date"]
 
 
 def time_stamp(arg1):
@@ -200,11 +212,11 @@ def hash_regex(sql_con):
 
 
 ud = UserData('my data.txt')
-sk_log = LogFile(ud.skill_path)
-ev_log = LogFile(ud.event_path)
+
+sk_log = LogFile(ud, ud.skill_path)
+ev_log = LogFile(ud, ud.event_path)
 sk_data = Skill()
 ev_data = Event()
-
 
 con = sql.connect("regex.sqlite")
 con.isolation_level = None
@@ -213,9 +225,6 @@ get_regex(con)
 
 sk_log.__next__(50)
 sk_data.group_same_times(50, sk_log)
-
-for i in sk_data.found_times:
-    print(sk_data.found_times[i])
 
 ev_log.__next__(75)
 ev_data.line_matcher(50, ev_log, con)
