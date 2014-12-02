@@ -191,6 +191,32 @@ def get_regex(sql_arg):
     return sql_arg
 
 
+def id_regex_setup(sql_arg):
+    try:
+        sql_arg.execute('''CREATE TABLE id_regex(regex TEXT, capture1 TEXT, capture2 TEXT, capture3 TEXT, capture4 TEXT,
+                           outcome TEXT, tool TEXT, target TEXT, craft_skill TEXT, tool_skill TEXT,
+                           action_type TEXT)''')
+    except sql.Error:
+        pass
+    with open("ID regex.csv", encoding='utf-8', newline='') as fp:
+        csv_reader = csv.reader(fp)
+        for entries in csv_reader:
+            entry_present = sum(len(_rows) for _rows in
+                                sql_arg.execute('''SELECT * FROM id_regex WHERE regex=? and capture1=?
+                                                and capture2=? and capture3=? and capture4=? and outcome=? and tool=?
+                                                and target=? and craft_skill=? and tool_skill=? and action_type=?''',
+                                                (entries[0], entries[1], entries[2], entries[3], entries[4],
+                                                entries[5], entries[6], entries[7], entries[8], entries[9],
+                                                entries[10])))
+                                                # Are the entries-csv values in DB?
+            if entry_present == 0:
+                # Generator will result in 0 if entries-csv values are absent.
+                sql_arg.execute('INSERT into id_regex VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                                (entries[0], entries[1], entries[2], entries[3], entries[4], entries[5], entries[6],
+                                entries[7], entries[8], entries[9], entries[10]))
+    return sql_arg
+
+
 def csv_import_generator(file):
     with open(file) as csvfile:
         dialect = csv.Sniffer().sniff(csvfile.read(1024))
@@ -222,6 +248,7 @@ con = sql.connect("regex.sqlite")
 con.isolation_level = None
 
 get_regex(con)
+id_regex_setup(con)
 
 sk_log.__next__(50)
 sk_data.group_same_times(50, sk_log)
