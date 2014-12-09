@@ -86,7 +86,6 @@ class UserData:
         """
         self.Data = namedtuple('Data', 'skill, event, start, end')
         d = next(map(self.Data._make, csv.reader(open(file))))
-        print(d)
         if Path(d.event).exists():
             self.event_path = Path(d.event)
         else:
@@ -136,23 +135,45 @@ class Skill:
 class Event:
     def __init__(self):
         self.line_matches = list()
-        self.Line = namedtuple('Line', ['time', 'line', 'tool', 'target'])
+        self.Line = namedtuple('Line', ['time', 'line', 'outcome', 'tool', 'target', 'craft_skill', 'tool_skill',
+                                        'action_type'])
+        self.Match = namedtuple('Match', ['regex', 'capture1', 'capture2', 'capture3', 'capture4',
+                                          'outcome', 'tool', 'target', 'craft_skill', 'tool_skill', 'action_type'])
 
-    def line_matcher(self, _line_cnt, _log_class, _sql_con):
+    def line_matcher(self, line_cnt, log_class, re_con):
         """
 
-        :param _line_cnt: int
-        :param _log_class: LogFile
-        :param _sql_con: sql.connect
+        :param line_cnt: int
+        :param log_class: LogFile
+        :param re_con: sql.connect
         """
-        for _line in _log_class.line_consumer(_line_cnt):
-            with _sql_con:
-                for _row in _sql_con.execute('SELECT * FROM REGEX_LOOK'):
+        for _line in log_class.line_consumer(line_cnt):
+            with re_con:
+                for _row in re_con.execute('SELECT * FROM REGEX_LOOK'):
+                    # Get re patterns from re_con and look for matches in a list passed in from LogFile class.
                     result = re.search(_row[0], _line.line)
                     if result:
-                        self.line_matches.append(self.Line(time=_line.time, line=_line.line, tool="", target=""))
-                        break
+                        match_len = len(result.groups())
+                        match_this = [_row[0]]
+                        match_reg = 'SELECT * FROM id_regex where regex=?'
+                        construct_reg = list()
+                        a = str()
+                        for i in range(match_len):
+                            match_this.append(result.groups()[i])
+                            construct_reg.append(' and capture' + str(i + 1) + '=?')
+                        match_reg += a.join(construct_reg)
+                        #print('reg: {}\r\nentry: {}'.format(match_reg, match_this))
+                        row = None
+                        for row in re_con.execute(str(match_reg), tuple(match_this)):
+                            pass
+                        if row:
+                            b = self.Match._make(row)
+                            #print("row: {}\r\nline: {}".format(row, _line.line))
+                            self.line_matches.append(self.Line(time=_line.time, line=_line.line, outcome=b.outcome,
+                                                               tool=b.tool, target=b.target, craft_skill=b.craft_skill,
+                                                               tool_skill=b.tool_skill, action_type=b.action_type))
 
+                        break
     pass
 
 
@@ -172,7 +193,7 @@ def time_stamp(arg1):
     return None, _time_part
 
 
-def get_regex(sql_arg):
+def regex_setup(sql_arg):
     try:
         sql_arg.execute('''CREATE TABLE regex_look(regex TEXT, outcome TEXT)''')
     except sql.Error:
@@ -247,11 +268,14 @@ ev_data = Event()
 con = sql.connect("regex.sqlite")
 con.isolation_level = None
 
-get_regex(con)
+regex_setup(con)
 id_regex_setup(con)
 
 sk_log.__next__(50)
 sk_data.group_same_times(50, sk_log)
 
-ev_log.__next__(75)
-ev_data.line_matcher(50, ev_log, con)
+ev_log.__next__(20000)
+ev_data.line_matcher(20000, ev_log, con)
+
+for line in ev_data.line_matches:
+    print(line)
