@@ -4,6 +4,7 @@ import csv
 import sqlite3 as sql
 import re
 import hashlib
+import time
 from pathlib import WindowsPath as Path
 
 
@@ -69,10 +70,10 @@ class LogFile:
             line_count = len(self.line_list)
         for _ in range(line_count):
             try:
-                _line = self.line_list.pop(0)
+                line = self.line_list.pop(0)
             except IndexError:
                 raise StopIteration
-            yield _line
+            yield line
 
     pass
 
@@ -118,27 +119,31 @@ class Skill:
         :param _log_class: LogFile
         :param _line_cnt: int
         """
-        for _line in _log_class.line_consumer(_line_cnt):
-            result = re.search('([a-zA-Z]+) increased by ([.0-9]+) to ([.0-9]+)', _line.line)
+        for line in _log_class.line_consumer(_line_cnt):
+            result = re.search('([a-zA-Z]+) increased by ([.0-9]+) to ([.0-9]+)', line.line)
             if result:
                 self.sk_values = self.Line_Values(result.group(1), float(result.group(2)), float(result.group(3)),
-                                                  _line.line)
+                                                  line.line)
             if not result:
                 raise ValueError
-            if _line.time in self.found_times:
-                self.found_times[_line.time].append(self.sk_values)
+            if line.time in self.found_times:
+                self.found_times[line.time].append(self.sk_values)
             else:
-                self.found_times[_line.time] = [self.sk_values]
+                self.found_times[line.time] = [self.sk_values]
     pass
 
 
 class Event:
     def __init__(self):
         self.line_matches = list()
+        self.sequences = list()
         self.Line = namedtuple('Line', ['time', 'line', 'outcome', 'tool', 'target', 'craft_skill', 'tool_skill',
                                         'action_type'])
+        self.Sequence = namedtuple('Sequence', ['start', 'end', 'delta', 'tool', 'target', 'craft_skill', 'tool_skill',
+                                                'action_type'])
         self.Match = namedtuple('Match', ['regex', 'capture1', 'capture2', 'capture3', 'capture4',
                                           'outcome', 'tool', 'target', 'craft_skill', 'tool_skill', 'action_type'])
+        self.sequence_start = None
 
     def line_matcher(self, line_cnt, log_class, re_con):
         """
@@ -162,18 +167,69 @@ class Event:
                             match_this.append(result.groups()[i])
                             construct_reg.append(' and capture' + str(i + 1) + '=?')
                         match_reg += a.join(construct_reg)
-                        #print('reg: {}\r\nentry: {}'.format(match_reg, match_this))
+                        # print('reg: {}\r\nentry: {}'.format(match_reg, match_this))
                         row = None
                         for row in re_con.execute(str(match_reg), tuple(match_this)):
                             pass
                         if row:
                             b = self.Match._make(row)
-                            #print("row: {}\r\nline: {}".format(row, _line.line))
+                            # print("row: {}\r\nline: {}".format(row, _line.line))
                             self.line_matches.append(self.Line(time=_line.time, line=_line.line, outcome=b.outcome,
                                                                tool=b.tool, target=b.target, craft_skill=b.craft_skill,
                                                                tool_skill=b.tool_skill, action_type=b.action_type))
 
                         break
+
+    def line_consumer(self, line_count=0):
+        if len(self.line_matches) < line_count:
+            line_count = len(self.line_matches)
+        for _ in list(range(line_count)):
+            try:
+                line = self.line_matches.pop(0)
+            except IndexError:
+                raise StopIteration
+            # print('index: {}, line {}'.format(i, line))
+            yield line
+
+    def event_sequencer(self, line_count=1):
+        """
+
+
+        :rtype : object
+        :param line_count: int
+        """
+        match_check = ''
+        a = self.line_consumer(line_count)
+        for _ in list(range(line_count)):
+            try:
+                b = a.__next__()
+            except StopIteration:
+                break
+
+            if b.outcome == 'start' and self.sequence_start is None:
+                self.sequence_start = b
+                match_check = '{}_{}_{}_{}_{}'.format(b.tool, b.target, b.craft_skill, b.tool_skill, b.action_type)
+                continue
+            if b.outcome != 'start' and self.sequence_start is None:
+                # todo Here is an end without a start, error log is needed here?
+                continue
+            if b.outcome == 'start' and self.sequence_start is not None:
+                # todo Here is a start without an end, error log needed here?
+                self.sequence_start = None
+                continue
+            if b.outcome != 'start' and self.sequence_start is not None:
+                if match_check != '{}_{}_{}_{}_{}'.format(self.sequence_start.tool, self.sequence_start.target,
+                                                          self.sequence_start.craft_skill,
+                                                          self.sequence_start.tool_skill,
+                                                          self.sequence_start.action_type):
+                    # todo Here is a start and end that don't match, error log needed?
+                    pass
+                self.sequences.append(self.Sequence(start=self.sequence_start.time, end=b.time,
+                                                    delta=b.time - self.sequence_start.time, tool=b.tool,
+                                                    target=b.target, craft_skill=b.craft_skill, tool_skill=b.tool_skill,
+                                                    action_type=b.action_type))
+                self.sequence_start = None
+
     pass
 
 
@@ -205,7 +261,7 @@ def regex_setup(sql_arg):
             entry_present = sum(len(_rows) for _rows in
                                 sql_arg.execute('SELECT * FROM regex_look WHERE regex=? and outcome=?',
                                                 (entries[0], entries[1])))
-                                                # Are the entries-csv values in DB?
+            # Are the entries-csv values in DB?
             if entry_present == 0:
                 # Generator will result in 0 if entries-csv values are absent.
                 sql_arg.execute('INSERT into regex_look VALUES (?,?)', (entries[0], entries[1]))
@@ -227,14 +283,14 @@ def id_regex_setup(sql_arg):
                                                 and capture2=? and capture3=? and capture4=? and outcome=? and tool=?
                                                 and target=? and craft_skill=? and tool_skill=? and action_type=?''',
                                                 (entries[0], entries[1], entries[2], entries[3], entries[4],
-                                                entries[5], entries[6], entries[7], entries[8], entries[9],
-                                                entries[10])))
-                                                # Are the entries-csv values in DB?
+                                                 entries[5], entries[6], entries[7], entries[8], entries[9],
+                                                 entries[10])))
+            # Are the entries-csv values in DB?
             if entry_present == 0:
                 # Generator will result in 0 if entries-csv values are absent.
                 sql_arg.execute('INSERT into id_regex VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                                 (entries[0], entries[1], entries[2], entries[3], entries[4], entries[5], entries[6],
-                                entries[7], entries[8], entries[9], entries[10]))
+                                 entries[7], entries[8], entries[9], entries[10]))
     return sql_arg
 
 
@@ -271,11 +327,17 @@ con.isolation_level = None
 regex_setup(con)
 id_regex_setup(con)
 
-sk_log.__next__(50)
-sk_data.group_same_times(50, sk_log)
+lines_to_do = 50
 
-ev_log.__next__(20000)
-ev_data.line_matcher(20000, ev_log, con)
+sk_log.__next__(lines_to_do)
+sk_data.group_same_times(lines_to_do, sk_log)
 
-for line in ev_data.line_matches:
-    print(line)
+ev_log.__next__(lines_to_do)
+print('log: {}'.format(len(ev_log.line_list)))
+ev_data.line_matcher(lines_to_do, ev_log, con)
+print('matches: {}'.format(len(ev_data.line_matches)))
+ev_data.event_sequencer(lines_to_do)
+
+print('log {}, matches {}'.format(len(ev_log.line_list), len(ev_data.line_matches)))
+for top in ev_data.sequences:
+    print(top)
