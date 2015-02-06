@@ -65,16 +65,6 @@ class LogFile:
                 if self.start_date <= self.datetime_whole:
                     return _log_position[1]
 
-    def line_consumer(self, line_count=0):
-        if len(self.line_list) < line_count:
-            line_count = len(self.line_list)
-        for _ in range(line_count):
-            try:
-                line = self.line_list.pop(0)
-            except IndexError:
-                raise StopIteration
-            yield line
-
     pass
 
 
@@ -109,24 +99,26 @@ class UserData:
 
 class Skill:
     def __init__(self):
-        self.found_times = dict()
+        self.found_times = dict()  # dictionary with values as list objects
         self.sk_values = tuple()
         self.Line_Values = namedtuple('Line_Values', ['skill', 'gain', 'level', 'line'])
 
-    def group_same_times(self, _line_cnt, _log_class):
+    def group_same_times(self, line_cnt, log_class):
         """
 
-        :param _log_class: LogFile
-        :param _line_cnt: int
+        :param log_class: LogFile
+        :param line_cnt: int
         """
-        for line in _log_class.line_consumer(_line_cnt):
-            result = re.search('([a-zA-Z]+) increased by ([.0-9]+) to ([.0-9]+)', line.line)
+        for line in list_pop(log_class.line_list, line_cnt):
+            result = re.search('([a-zA-Z\-]+) increased by ([.0-9]+) to ([.0-9]+)', line.line)
             if result:
                 self.sk_values = self.Line_Values(result.group(1), float(result.group(2)), float(result.group(3)),
                                                   line.line)
             if not result:
                 raise ValueError
             if line.time in self.found_times:
+                # Dictionary with unique datetime keys allows membership tests. Here we can group skill gains by times.
+                # Note that dictionary keys aren't ordered so datetime keys will not be chronological order.
                 self.found_times[line.time].append(self.sk_values)
             else:
                 self.found_times[line.time] = [self.sk_values]
@@ -152,11 +144,11 @@ class Event:
         :param log_class: LogFile
         :param re_con: sql.connect
         """
-        for _line in log_class.line_consumer(line_cnt):
+        for line in list_pop(log_class.line_list, line_cnt):
             with re_con:
                 for _row in re_con.execute('SELECT * FROM REGEX_LOOK'):
                     # Get re patterns from re_con and look for matches in a list passed in from LogFile class.
-                    result = re.search(_row[0], _line.line)
+                    result = re.search(_row[0], line.line)
                     if result:
                         match_len = len(result.groups())
                         match_this = [_row[0]]
@@ -174,22 +166,11 @@ class Event:
                         if row:
                             b = self.Match._make(row)
                             # print("row: {}\r\nline: {}".format(row, _line.line))
-                            self.line_matches.append(self.Line(time=_line.time, line=_line.line, outcome=b.outcome,
+                            self.line_matches.append(self.Line(time=line.time, line=line.line, outcome=b.outcome,
                                                                tool=b.tool, target=b.target, craft_skill=b.craft_skill,
                                                                tool_skill=b.tool_skill, action_type=b.action_type))
 
                         break
-
-    def line_consumer(self, line_count=0):
-        if len(self.line_matches) < line_count:
-            line_count = len(self.line_matches)
-        for _ in list(range(line_count)):
-            try:
-                line = self.line_matches.pop(0)
-            except IndexError:
-                raise StopIteration
-            # print('index: {}, line {}'.format(i, line))
-            yield line
 
     def event_sequencer(self, line_count=1):
         """
@@ -199,7 +180,7 @@ class Event:
         :param line_count: int
         """
         match_check = ''
-        a = self.line_consumer(line_count)
+        a = list_pop(self.line_matches, line_count)
         for _ in list(range(line_count)):
             try:
                 b = a.__next__()
@@ -229,8 +210,32 @@ class Event:
                                                     target=b.target, craft_skill=b.craft_skill, tool_skill=b.tool_skill,
                                                     action_type=b.action_type))
                 self.sequence_start = None
+    pass
+
+
+class SkillEvent:
+    def __init__(self):
+        self.Match = namedtuple("Match", ["event", 'skill'])
+        self.match_list = list()
+
+    def matcher(self, skill_dict, event_list, line_count=1):
+        generator = list_pop(event_list, line_count)
+        for _ in generator:
+
+        pass
 
     pass
+
+
+def list_pop(my_list, line_count=0):
+    if len(my_list) < line_count:
+        line_count = len(my_list)
+    for _ in range(line_count):
+        try:
+            line = my_list.pop(0)
+        except IndexError:
+            raise StopIteration
+        yield line
 
 
 def time_stamp(arg1):
@@ -320,6 +325,7 @@ sk_log = LogFile(ud, ud.skill_path)
 ev_log = LogFile(ud, ud.event_path)
 sk_data = Skill()
 ev_data = Event()
+matched = SkillEvent()
 
 con = sql.connect("regex.sqlite")
 con.isolation_level = None
@@ -327,17 +333,24 @@ con.isolation_level = None
 regex_setup(con)
 id_regex_setup(con)
 
-lines_to_do = 50
+lines_to_do = 500
 
 sk_log.__next__(lines_to_do)
 sk_data.group_same_times(lines_to_do, sk_log)
 
 ev_log.__next__(lines_to_do)
-print('log: {}'.format(len(ev_log.line_list)))
 ev_data.line_matcher(lines_to_do, ev_log, con)
-print('matches: {}'.format(len(ev_data.line_matches)))
 ev_data.event_sequencer(lines_to_do)
 
-print('log {}, matches {}'.format(len(ev_log.line_list), len(ev_data.line_matches)))
+
+
+sk_keys = sk_data.found_times.keys()
+sk_values = sk_data.found_times.values()
+
+
+for key in sk_keys:
+    print('key: {}, len: {}, value: {}'.format(key, len(sk_data.found_times[key]), sk_data.found_times[key]))
 for top in ev_data.sequences:
     print(top)
+
+matched.matcher(sk_data.found_times, ev_data.sequences)
