@@ -30,3 +30,4 @@
 "You start to build ([A-Za-z ]+).","start"
 "You start to attach the lock.","start"
 "You attach the lock and lock the door.","success"
+"You stop continuing.", "stop"

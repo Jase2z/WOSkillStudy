@@ -8,3 +8,4 @@
 "You attach the ([A-Za-z ]+) to the ([A-Za-z ]+).","log","pile",,,"success","log","pile","Coal-making",,"continue"
 "You create a ([A-Za-z ]+) in front of you on the ground.","pile",,,,"success","kindling","log","Coal-making",,"create"
 "You create a ([A-Za-z ]+) in front of you on the ground.","Unfinished  pile",,,,"success","kindling","log","Coal-making",,"create"
+"You stop continuing.",,,,, "stop",,,,,

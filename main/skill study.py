@@ -4,7 +4,6 @@ import csv
 import sqlite3 as sql
 import re
 import hashlib
-import time
 from pathlib import WindowsPath as Path
 
 
@@ -101,7 +100,7 @@ class Skill:
     def __init__(self):
         self.found_times = dict()  # dictionary with values as list objects
         self.sk_values = tuple()
-        self.Line_Values = namedtuple('Line_Values', ['skill', 'gain', 'level', 'line'])
+        self.Skill_Values = namedtuple('Skill_Values', ['skill', 'gain', 'level', 'line'])
 
     def group_same_times(self, line_cnt, log_class):
         """
@@ -112,7 +111,7 @@ class Skill:
         for line in list_pop(log_class.line_list, line_cnt):
             result = re.search('([a-zA-Z\-]+) increased by ([.0-9]+) to ([.0-9]+)', line.line)
             if result:
-                self.sk_values = self.Line_Values(result.group(1), float(result.group(2)), float(result.group(3)),
+                self.sk_values = self.Skill_Values(result.group(1), float(result.group(2)), float(result.group(3)),
                                                   line.line)
             if not result:
                 raise ValueError
@@ -121,7 +120,8 @@ class Skill:
                 # Note that dictionary keys aren't ordered so datetime keys will not be chronological order.
                 self.found_times[line.time].append(self.sk_values)
             else:
-                self.found_times[line.time] = [self.sk_values]
+                self.found_times[line.time] = list()
+                self.found_times[line.time].append(self.sk_values)
     pass
 
 
@@ -215,19 +215,29 @@ class Event:
 
 class SkillEvent:
     def __init__(self):
-        self.Match = namedtuple("Match", ["event", 'skill'])
+        self.Match = namedtuple('Match', ['event', 'skill'])
         self.match_list = list()
 
     def matcher(self, skill_dict, event_list, line_count=1):
-        generator = list_pop(event_list, line_count)
-        for _ in generator:
-
-        pass
+        for line in list_pop(event_list, line_count):
+            # print(line)
+            generator = skill_dict.keys()
+            # print('length: {}'.format(len(skill_dict.keys())))
+            for skill_key in generator:
+                # print('list: {}'.format(skill_dict[skill_key]))
+                for gain in list(range(len(skill_dict[skill_key]))):
+                    # print('gain: {}'.format(skill_dict[skill_key][gain]))
+                    pass
+                if line.end >= skill_key > line.start:
+                        # print('{}: {}\r\nline: {}'.format(skill_key, skill_dict[skill_key], line))
+                        # print('skill: {}, line: {}'.format(skill_key, line.start))
+                        # self.match_list.append(self.Match(event=line, skill=skill_dict[skill_key]))
+                        pass
 
     pass
 
 
-def list_pop(my_list, line_count=0):
+def list_pop(my_list, line_count=1):
     if len(my_list) < line_count:
         line_count = len(my_list)
     for _ in range(line_count):
@@ -336,21 +346,21 @@ id_regex_setup(con)
 lines_to_do = 500
 
 sk_log.__next__(lines_to_do)
-sk_data.group_same_times(lines_to_do, sk_log)
+sk_data.group_same_times(1000, sk_log)
 
 ev_log.__next__(lines_to_do)
-ev_data.line_matcher(lines_to_do, ev_log, con)
-ev_data.event_sequencer(lines_to_do)
+print('line list: {}'.format(len(ev_log.line_list)))
+ev_data.line_matcher(1000, ev_log, con)
+print('line list: {}'.format(len(ev_log.line_list)))
 
+print('line match: {}'.format(len(ev_data.line_matches)))
+ev_data.event_sequencer(1000)
+print('line match: {}'.format(len(ev_data.line_matches)))
 
+print('line sequence: {}'.format(len(ev_data.sequences)))
+matched.matcher(sk_data.found_times, ev_data.sequences, 1000)
+print('line sequence: {}'.format(len(ev_data.sequences)))
 
-sk_keys = sk_data.found_times.keys()
-sk_values = sk_data.found_times.values()
-
-
-for key in sk_keys:
-    print('key: {}, len: {}, value: {}'.format(key, len(sk_data.found_times[key]), sk_data.found_times[key]))
-for top in ev_data.sequences:
-    print(top)
-
-matched.matcher(sk_data.found_times, ev_data.sequences)
+print('match list: {}'.format(len(matched.match_list)))
+for entry in matched.match_list:
+    print(entry)
