@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import namedtuple
 import csv
 import sqlite3 as sql
@@ -27,32 +27,31 @@ class LogFile:
     def __iter__(self):
         return
 
-    def __next__(self, _count=50):
-        with self.Path.open(encoding='utf-8') as _fp:
-            _fp.seek(self.log_position)
-            for _line in iter(_fp.readline, ''):
-                self.log_position = _fp.tell()
-                _line = _line.strip()
-                date1, time1 = time_stamp(_line)
+    def __next__(self):
+        with self.Path.open(encoding='utf-8') as fp:
+            fp.seek(self.log_position)
+            for line in iter(fp.readline, ''):
+                self.log_position = fp.tell()
+                line = line.strip()
+                date1, time1 = time_stamp(line)
                 if date1 is not None:
                     self.date_part = date1
                     continue
                 if time1 is not None:
                     self.time_part = time1
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
-                self.line_list.append(self.Line(self.datetime_whole, _line[11:]))
-                _count -= 1
-                if _count <= 0:
+                if self.datetime_whole > ud.sample_end:
                     break
+                self.line_list.append(self.Line(self.datetime_whole, line[11:]))
 
     def get_log_position(self):
-        _log_position = list()
-        with self.Path.open(encoding='utf-8') as _fp:
-            for _line in iter(_fp.readline, ''):
-                _log_position.insert(0, _fp.tell())
-                _log_position = _log_position[:2]
-                _line = _line.strip()
-                date1, time1 = time_stamp(_line)
+        log_position = list()
+        with self.Path.open(encoding='utf-8') as fp:
+            for line in iter(fp.readline, ''):
+                log_position.insert(0, fp.tell())
+                log_position = log_position[:2]
+                line = line.strip()
+                date1, time1 = time_stamp(line)
                 if date1 is not None:
                     self.date_part = date1
                     continue
@@ -62,53 +61,67 @@ class LogFile:
                     continue
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
                 if self.start_date <= self.datetime_whole:
-                    return _log_position[1]
+                    return log_position[1]
 
     pass
 
 
 class UserData:
-    def __init__(self, file):
+    def __init__(self, file, minute_delta):
         """
 
         :param file: str
         :raise ValueError:
         """
-        self.Data = namedtuple('Data', 'skill, event, start, end')
-        d = next(map(self.Data._make, csv.reader(open(file))))
-        if Path(d.event).exists():
-            self.event_path = Path(d.event)
-        else:
-            raise ValueError
-        if Path(d.skill).exists():
-            self.skill_path = Path(d.skill)
-        else:
-            raise ValueError
-        if type(eval(d.start)) is datetime:
-            self.start_date = eval(d.start)
-        else:
-            raise ValueError
-        if type(eval(d.end)) is datetime:
-            self.end_date = eval(d.end)
-        else:
-            raise ValueError
+        self.DataTxt = namedtuple('DataTxt', 'label, value')
+        for data in map(self.DataTxt._make, csv.reader(open(file, newline=''), quoting=csv.QUOTE_MINIMAL)):
+            if data.label == 'event_path' and Path(data.value).exists():
+                self.event_path = Path(data.value)
+            if data.label == 'skill_path' and Path(data.value).exists():
+                self.skill_path = Path(data.value)
+            if data.label == 'start_date' and type(eval(data.value)) is datetime:
+                self.start_date = eval(data.value)
+            if data.label == 'end_date' and type(eval(data.value)) is datetime:
+                self.end_date = eval(data.value)
+        # todo Need to add error messages for when a path doesn't exist or a datetime is invalid.
+        self.sample_start = self.start_date
+        self.sample_end = self.start_date + minute_delta
+
+    def increment_sample_window(self, minuets):
+        if type(minuets) is not timedelta:
+            # todo need error handling for when minuets is not a timedelta type.
+            pass
+        self.sample_start += minuets
+        self.sample_end += minuets
+
 
     pass
 
 
 class Skill:
     def __init__(self):
+        """
+
+        :type self: object
+        """
         self.found_times = dict()  # dictionary with values as list objects
         self.sk_values = tuple()
         self.Skill_Values = namedtuple('Skill_Values', ['skill', 'gain', 'level', 'line'])
 
-    def group_same_times(self, line_cnt, log_class):
+    def group_same_times(self, log_class, count=0):
         """
+        Group skill log entries with same timestamps.
 
         :param log_class: LogFile
-        :param line_cnt: int
+        :param count: int
         """
-        for line in list_pop(log_class.line_list, line_cnt):
+        if count == 0:
+            count = len(log_class.line_list)
+        for _ in list(range(count)):
+            try:
+                line = log_class.line_list.pop(0)
+            except IndexError:
+                raise StopIteration
             result = re.search('([a-zA-Z\-]+) increased by ([.0-9]+) to ([.0-9]+)', line.line)
             if result:
                 self.sk_values = self.Skill_Values(result.group(1), float(result.group(2)), float(result.group(3)),
@@ -122,6 +135,17 @@ class Skill:
             else:
                 self.found_times[line.time] = list()
                 self.found_times[line.time].append(self.sk_values)
+
+    def remove_older_times(self, oldest_time):
+        """
+        Remove older grouped entries.
+        :param oldest_time: datetime
+        """
+        keys = tuple(self.found_times.keys())
+        for skill_key in keys:
+            # print('Old {}, key {}'.format(oldest_time, skill_key))
+            if skill_key <= oldest_time:
+                del self.found_times[skill_key]
     pass
 
 
@@ -137,14 +161,20 @@ class Event:
                                           'outcome', 'tool', 'target', 'craft_skill', 'tool_skill', 'action_type'])
         self.sequence_start = None
 
-    def line_matcher(self, line_cnt, log_class, re_con):
+    def line_matcher(self, log_class, re_con, count=0):
         """
 
         :param line_cnt: int
         :param log_class: LogFile
         :param re_con: sql.connect
         """
-        for line in list_pop(log_class.line_list, line_cnt):
+        if count == 0:
+            count = len(log_class.line_list)
+        for _ in list(range(count)):
+            try:
+                line = log_class.line_list.pop(0)
+            except IndexError:
+                raise StopIteration
             with re_con:
                 for _row in re_con.execute('SELECT * FROM REGEX_LOOK'):
                     # Get re patterns from re_con and look for matches in a list passed in from LogFile class.
@@ -172,7 +202,7 @@ class Event:
 
                         break
 
-    def event_sequencer(self, line_count=1):
+    def event_sequencer(self, count=0):
         """
 
 
@@ -180,35 +210,37 @@ class Event:
         :param line_count: int
         """
         match_check = ''
-        a = list_pop(self.line_matches, line_count)
-        for _ in list(range(line_count)):
+        if count == 0:
+            count = len(self.line_matches)
+    
+        for _ in list(range(count)):
             try:
-                b = a.__next__()
-            except StopIteration:
-                break
+                line = self.line_matches.pop(0)
+            except IndexError:
+                raise StopIteration
 
-            if b.outcome == 'start' and self.sequence_start is None:
-                self.sequence_start = b
-                match_check = '{}_{}_{}_{}_{}'.format(b.tool, b.target, b.craft_skill, b.tool_skill, b.action_type)
+            if line.outcome == 'start' and self.sequence_start is None:
+                self.sequence_start = line
+                match_check = '{}_{}_{}_{}_{}'.format(line.tool, line.target, line.craft_skill, line.tool_skill, line.action_type)
                 continue
-            if b.outcome != 'start' and self.sequence_start is None:
+            if line.outcome != 'start' and self.sequence_start is None:
                 # todo Here is an end without a start, error log is needed here?
                 continue
-            if b.outcome == 'start' and self.sequence_start is not None:
+            if line.outcome == 'start' and self.sequence_start is not None:
                 # todo Here is a start without an end, error log needed here?
                 self.sequence_start = None
                 continue
-            if b.outcome != 'start' and self.sequence_start is not None:
+            if line.outcome != 'start' and self.sequence_start is not None:
                 if match_check != '{}_{}_{}_{}_{}'.format(self.sequence_start.tool, self.sequence_start.target,
                                                           self.sequence_start.craft_skill,
                                                           self.sequence_start.tool_skill,
                                                           self.sequence_start.action_type):
                     # todo Here is a start and end that don't match, error log needed?
                     pass
-                self.sequences.append(self.Sequence(start=self.sequence_start.time, end=b.time,
-                                                    delta=b.time - self.sequence_start.time, tool=b.tool,
-                                                    target=b.target, craft_skill=b.craft_skill, tool_skill=b.tool_skill,
-                                                    action_type=b.action_type))
+                self.sequences.append(self.Sequence(start=self.sequence_start.time, end=line.time,
+                                                    delta=line.time - self.sequence_start.time, tool=line.tool,
+                                                    target=line.target, craft_skill=line.craft_skill, tool_skill=line.tool_skill,
+                                                    action_type=line.action_type))
                 self.sequence_start = None
     pass
 
@@ -217,35 +249,45 @@ class SkillEvent:
     def __init__(self):
         self.Match = namedtuple('Match', ['event', 'skill'])
         self.match_list = list()
+        self.last_line_time = datetime
 
-    def matcher(self, skill_dict, event_list, line_count=1):
-        for line in list_pop(event_list, line_count):
-            # print(line)
-            generator = skill_dict.keys()
-            # print('length: {}'.format(len(skill_dict.keys())))
-            for skill_key in generator:
+    def matcher(self, skill_dict, event_list):
+        # print('key length {}'.format(len(skill_dict.keys())))
+        count = len(event_list)
+        for _ in list(range(count)):
+            line = event_list.pop(0)
+            print('line: {}'.format(line))
+            #try:
+            #    line = event_list.pop(0)
+            #except IndexError:
+            #    raise StopIteration
+            keys = skill_dict.keys()
+            for skill_key in keys:
                 # print('list: {}'.format(skill_dict[skill_key]))
                 for gain in list(range(len(skill_dict[skill_key]))):
                     # print('gain: {}'.format(skill_dict[skill_key][gain]))
                     pass
                 if line.end >= skill_key > line.start:
-                        # print('{}: {}\r\nline: {}'.format(skill_key, skill_dict[skill_key], line))
-                        # print('skill: {}, line: {}'.format(skill_key, line.start))
-                        # self.match_list.append(self.Match(event=line, skill=skill_dict[skill_key]))
-                        pass
-
+                    # print('{} | {}\nline: {}\n'.format(skill_key, skill_dict[skill_key], line))
+                    # print('skill: {}, line: {}'.format(skill_key, line.start))
+                    self.match_list.append(self.Match(event=line, skill=skill_dict[skill_key]))
+                    pass
+            # print('date {}, line {}'.format(line.end, line))
+            self.last_line_time = line.end
+        sk_data.remove_older_times(self.last_line_time)
+        # print('key length {}, old date {}'.format(len(skill_dict.keys()), self.last_line_time))
+        for skill_key in skill_dict.keys():
+            # print('{}'.format(skill_key))
+            pass
     pass
 
 
-def list_pop(my_list, line_count=1):
-    if len(my_list) < line_count:
-        line_count = len(my_list)
-    for _ in range(line_count):
-        try:
-            line = my_list.pop(0)
-        except IndexError:
-            raise StopIteration
-        yield line
+def list_pop(my_list):
+    try:
+        line = my_list.pop(0)
+    except IndexError:
+        raise StopIteration
+    yield line
 
 
 def time_stamp(arg1):
@@ -329,7 +371,7 @@ def hash_regex(sql_con):
                 f.write('{}\r\n'.format(hashlib.md5(row[0].encode()).hexdigest()))
 
 
-ud = UserData('my data.txt')
+ud = UserData('my data.txt', timedelta(minutes=15))
 
 sk_log = LogFile(ud, ud.skill_path)
 ev_log = LogFile(ud, ud.event_path)
@@ -343,24 +385,30 @@ con.isolation_level = None
 regex_setup(con)
 id_regex_setup(con)
 
-lines_to_do = 500
 
-sk_log.__next__(lines_to_do)
-sk_data.group_same_times(1000, sk_log)
+sk_log.__next__()
+print('skill list: {}'.format(len(sk_log.line_list)))
+sk_data.group_same_times(sk_log)
+print('skill list: {}'.format(len(sk_log.line_list)))
+print('skill key length: {}'.format(len(tuple(sk_data.found_times.keys()))))
 
-ev_log.__next__(lines_to_do)
+ev_log.__next__()
 print('line list: {}'.format(len(ev_log.line_list)))
-ev_data.line_matcher(1000, ev_log, con)
+ev_data.line_matcher(ev_log, con)
 print('line list: {}'.format(len(ev_log.line_list)))
 
 print('line match: {}'.format(len(ev_data.line_matches)))
-ev_data.event_sequencer(1000)
+ev_data.event_sequencer()
 print('line match: {}'.format(len(ev_data.line_matches)))
 
 print('line sequence: {}'.format(len(ev_data.sequences)))
-matched.matcher(sk_data.found_times, ev_data.sequences, 1000)
+matched.matcher(sk_data.found_times, ev_data.sequences)
 print('line sequence: {}'.format(len(ev_data.sequences)))
+print('skill key length: {}'.format(len(tuple(sk_data.found_times.keys()))))
 
-print('match list: {}'.format(len(matched.match_list)))
+for key in sk_data.found_times.keys():
+    # print(sk_data.found_times[key])
+    pass
 for entry in matched.match_list:
-    print(entry)
+    # print(entry)
+    pass
