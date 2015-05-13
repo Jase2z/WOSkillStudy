@@ -71,6 +71,7 @@ class UserData:
         """
 
         :param file: str
+        :param minute_delta: timedelta
         :raise ValueError:
         """
         self.DataTxt = namedtuple('DataTxt', 'label, value')
@@ -88,12 +89,15 @@ class UserData:
         self.sample_end = self.start_date + minute_delta
 
     def increment_sample_window(self, minuets):
+        """
+
+        :param minuets: timedelta
+        """
         if type(minuets) is not timedelta:
             # todo need error handling for when minuets is not a timedelta type.
             pass
         self.sample_start += minuets
         self.sample_end += minuets
-
 
     pass
 
@@ -125,7 +129,7 @@ class Skill:
             result = re.search('([a-zA-Z\-]+) increased by ([.0-9]+) to ([.0-9]+)', line.line)
             if result:
                 self.sk_values = self.Skill_Values(result.group(1), float(result.group(2)), float(result.group(3)),
-                                                  line.line)
+                                                   line.line)
             if not result:
                 raise ValueError
             if line.time in self.found_times:
@@ -139,6 +143,7 @@ class Skill:
     def remove_older_times(self, oldest_time):
         """
         Remove older grouped entries.
+
         :param oldest_time: datetime
         """
         keys = tuple(self.found_times.keys())
@@ -164,9 +169,10 @@ class Event:
     def line_matcher(self, log_class, re_con, count=0):
         """
 
-        :param line_cnt: int
-        :param log_class: LogFile
-        :param re_con: sql.connect
+        :type log_class: LogFile
+        :type re_con: _sqlite3.Connection
+        :type count: int
+        :raise StopIteration:
         """
         if count == 0:
             count = len(log_class.line_list)
@@ -205,14 +211,13 @@ class Event:
     def event_sequencer(self, count=0):
         """
 
-
-        :rtype : object
-        :param line_count: int
+        :type count: int
+        :raise StopIteration:
         """
         match_check = ''
         if count == 0:
             count = len(self.line_matches)
-    
+
         for _ in list(range(count)):
             try:
                 line = self.line_matches.pop(0)
@@ -221,7 +226,8 @@ class Event:
 
             if line.outcome == 'start' and self.sequence_start is None:
                 self.sequence_start = line
-                match_check = '{}_{}_{}_{}_{}'.format(line.tool, line.target, line.craft_skill, line.tool_skill, line.action_type)
+                match_check = '{}_{}_{}_{}_{}'.format(line.tool, line.target, line.craft_skill, line.tool_skill,
+                                                      line.action_type)
                 continue
             if line.outcome != 'start' and self.sequence_start is None:
                 # todo Here is an end without a start, error log is needed here?
@@ -239,8 +245,8 @@ class Event:
                     pass
                 self.sequences.append(self.Sequence(start=self.sequence_start.time, end=line.time,
                                                     delta=line.time - self.sequence_start.time, tool=line.tool,
-                                                    target=line.target, craft_skill=line.craft_skill, tool_skill=line.tool_skill,
-                                                    action_type=line.action_type))
+                                                    target=line.target, craft_skill=line.craft_skill,
+                                                    tool_skill=line.tool_skill, action_type=line.action_type))
                 self.sequence_start = None
     pass
 
@@ -252,33 +258,20 @@ class SkillEvent:
         self.last_line_time = datetime
 
     def matcher(self, skill_dict, event_list):
-        # print('key length {}'.format(len(skill_dict.keys())))
+        """
+
+        :type skill_dict: dict
+        :type event_list: list
+        """
         count = len(event_list)
         for _ in list(range(count)):
             line = event_list.pop(0)
-            print('line: {}'.format(line))
-            #try:
-            #    line = event_list.pop(0)
-            #except IndexError:
-            #    raise StopIteration
             keys = skill_dict.keys()
             for skill_key in keys:
-                # print('list: {}'.format(skill_dict[skill_key]))
-                for gain in list(range(len(skill_dict[skill_key]))):
-                    # print('gain: {}'.format(skill_dict[skill_key][gain]))
-                    pass
                 if line.end >= skill_key > line.start:
-                    # print('{} | {}\nline: {}\n'.format(skill_key, skill_dict[skill_key], line))
-                    # print('skill: {}, line: {}'.format(skill_key, line.start))
                     self.match_list.append(self.Match(event=line, skill=skill_dict[skill_key]))
-                    pass
-            # print('date {}, line {}'.format(line.end, line))
             self.last_line_time = line.end
         sk_data.remove_older_times(self.last_line_time)
-        # print('key length {}, old date {}'.format(len(skill_dict.keys()), self.last_line_time))
-        for skill_key in skill_dict.keys():
-            # print('{}'.format(skill_key))
-            pass
     pass
 
 
@@ -352,6 +345,10 @@ def id_regex_setup(sql_arg):
 
 
 def csv_import_generator(file):
+    """
+
+    :param file: str
+    """
     with open(file) as csvfile:
         dialect = csv.Sniffer().sniff(csvfile.read(1024))
         csvfile.seek(0)
@@ -371,7 +368,7 @@ def hash_regex(sql_con):
                 f.write('{}\r\n'.format(hashlib.md5(row[0].encode()).hexdigest()))
 
 
-ud = UserData('my data.txt', timedelta(minutes=15))
+ud = UserData('my data.txt', timedelta(minutes=90))
 
 sk_log = LogFile(ud, ud.skill_path)
 ev_log = LogFile(ud, ud.event_path)
@@ -404,11 +401,8 @@ print('line match: {}'.format(len(ev_data.line_matches)))
 print('line sequence: {}'.format(len(ev_data.sequences)))
 matched.matcher(sk_data.found_times, ev_data.sequences)
 print('line sequence: {}'.format(len(ev_data.sequences)))
-print('skill key length: {}'.format(len(tuple(sk_data.found_times.keys()))))
-
-for key in sk_data.found_times.keys():
-    # print(sk_data.found_times[key])
-    pass
-for entry in matched.match_list:
-    # print(entry)
-    pass
+test1 = len(tuple(sk_data.found_times.keys()))
+print('skill key length: {}'.format(test1))
+if test1 > 0:
+    for key in sk_data.found_times.keys():
+        print('key>{}, value>{}'.format(key, sk_data.found_times[key]))
