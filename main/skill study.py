@@ -20,7 +20,7 @@ class LogFile:
         self.date_part = datetime.min.date()
         self.datetime_whole = datetime
         self.line_list = list()
-        self.start_date = ud_obj.start_date
+        self.start_date = ud_obj.sample_start
         self.log_position = self.get_log_position()
         self.Line = namedtuple('Line', ['time', 'line'])
 
@@ -46,15 +46,24 @@ class LogFile:
 
     def get_log_position(self):
         log_position = list()
+        date1 = None
         with self.Path.open(encoding='utf-8') as fp:
             for line in iter(fp.readline, ''):
                 log_position.insert(0, fp.tell())
                 log_position = log_position[:2]
                 line = line.strip()
-                date1, time1 = time_stamp(line)
-                if date1 is not None:
-                    self.date_part = date1
-                    continue
+                if date1 is None or date1 < self.start_date:
+                    if 'Logging' in line[:7]:
+                        date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
+                        if isinstance(date1, datetime):
+                            self.date_part = date1
+                            continue
+                if self.date_part >= self.start_date.date():
+                    try:
+                        time1 = datetime.strptime(line[:10], "[%H:%M:%S]").time()
+                    except ValueError:
+                        pass
+
                 if time1 is not None:
                     self.time_part = time1
                 if self.date_part.year == 1:
@@ -81,12 +90,11 @@ class UserData:
             if data.label == 'skill_path' and Path(data.value).exists():
                 self.skill_path = Path(data.value)
             if data.label == 'start_date' and type(eval(data.value)) is datetime:
-                self.start_date = eval(data.value)
+                self.sample_start = eval(data.value)
             if data.label == 'end_date' and type(eval(data.value)) is datetime:
                 self.end_date = eval(data.value)
         # todo Need to add error messages for when a path doesn't exist or a datetime is invalid.
-        self.sample_start = self.start_date
-        self.sample_end = self.start_date + minute_delta
+        self.sample_end = self.sample_start + minute_delta
 
     def increment_sample_window(self, minuets):
         """
@@ -283,23 +291,12 @@ def list_pop(my_list):
     yield line
 
 
-def time_stamp(arg1):
-    """
-    Convert a string timestamp to datetime object.
-
-    'arg1' is a string containing a time stamp.
-    """
-    if 'Logging' in arg1[:7]:
-        _date_part = datetime.strptime(arg1[16:].strip(), "%Y-%m-%d").date()
-        return _date_part, None
-    try:
-        _time_part = datetime.strptime(arg1[:10], "[%H:%M:%S]").time()
-    except ValueError:
-        return None, None
-    return None, _time_part
-
-
 def regex_setup(sql_arg):
+    """
+
+    :param sql_arg: sql.Connection
+    :return:
+    """
     try:
         sql_arg.execute('''CREATE TABLE regex_look(regex TEXT, outcome TEXT)''')
     except sql.Error:
@@ -319,6 +316,11 @@ def regex_setup(sql_arg):
 
 
 def id_regex_setup(sql_arg):
+    """
+
+    :param sql_arg: sql.Connection
+    :return:
+    """
     try:
         sql_arg.execute('''CREATE TABLE id_regex(regex TEXT, capture1 TEXT, capture2 TEXT, capture3 TEXT, capture4 TEXT,
                            outcome TEXT, tool TEXT, target TEXT, craft_skill TEXT, tool_skill TEXT,
@@ -368,7 +370,7 @@ def hash_regex(sql_con):
                 f.write('{}\r\n'.format(hashlib.md5(row[0].encode()).hexdigest()))
 
 
-ud = UserData('my data.txt', timedelta(minutes=90))
+ud = UserData('my data.txt', timedelta(minutes=15))
 
 sk_log = LogFile(ud, ud.skill_path)
 ev_log = LogFile(ud, ud.event_path)
