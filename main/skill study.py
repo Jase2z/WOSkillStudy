@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, date, time
 from collections import namedtuple
+from bitstring import Bits
 import csv
 import sqlite3 as sql
 import re
@@ -52,27 +53,31 @@ class LogFile:
     def get_log_position(self):
         log_position = list()
         date1 = None
-        with self.Path.open(encoding='utf-8') as fp:
-            for line in iter(fp.readline, ''):
-                log_position.insert(0, fp.tell())
-                log_position = log_position[:2]
-                line = line.strip()
-                if date1 is None or date1 < self.start_date.date():
-                    if 'Logging' in line[:7]:
-                        date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
-                        if isinstance(date1, date):
-                            self.date_part = date1
-                            continue
-                if self.date_part >= self.start_date.date():
-                    try:
-                        time1 = datetime.strptime(line[:10], "[%H:%M:%S]").time()
-                    except ValueError:
-                        pass
-                    finally:
-                        self.time_part = time1
-                self.datetime_whole = datetime.combine(self.date_part, self.time_part)
-                if self.start_date <= self.datetime_whole:
-                    return log_position[1]
+        with self.Path.open(mode="rb") as fp:
+            #todo using a text based opened files with readline and looking for "logging" is far too slow.
+            # Going to work out a scheme using bitstrings to work with blocks of binary data.
+            j = Bits(b'Logging started')
+            p = Bits(fp)
+            s = list(p.findall(j, bytealigned=True))
+            print(s, len(s), sep='\n')
+            log_position.insert(0, fp.tell())
+            log_position = log_position[:2]
+            print(type(block), fp)
+            if date1 is None or date1 < self.start_date.date():
+                if 'Logging' in line[:7]:
+                    date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
+                    if isinstance(date1, date):
+                        self.date_part = date1
+            if self.date_part >= self.start_date.date():
+                try:
+                    time1 = datetime.strptime(line[:10], "[%H:%M:%S]").time()
+                except ValueError:
+                    pass
+                finally:
+                    self.time_part = time1
+            self.datetime_whole = datetime.combine(self.date_part, self.time_part)
+            if self.start_date <= self.datetime_whole:
+                return log_position[1]
 
     pass
 
