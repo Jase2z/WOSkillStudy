@@ -33,11 +33,16 @@ class LogFile:
             for line in iter(fp.readline, ''):
                 self.log_position = fp.tell()
                 line = line.strip()
-                date1, time1 = time_stamp(line)
-                if date1 is not None:
-                    self.date_part = date1
-                    continue
-                if time1 is not None:
+                if 'Logging' in line[:7]:
+                    date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
+                    if isinstance(date1, datetime):
+                        self.date_part = date1.date()
+                        continue
+                try:
+                    time1 = datetime.strptime(line[:10], "[%H:%M:%S]").time()
+                except ValueError:
+                    pass
+                finally:
                     self.time_part = time1
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
                 if self.datetime_whole > ud.sample_end:
@@ -56,18 +61,15 @@ class LogFile:
                     if 'Logging' in line[:7]:
                         date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
                         if isinstance(date1, datetime):
-                            self.date_part = date1
+                            self.date_part = date1.date()
                             continue
                 if self.date_part >= self.start_date.date():
                     try:
                         time1 = datetime.strptime(line[:10], "[%H:%M:%S]").time()
                     except ValueError:
                         pass
-
-                if time1 is not None:
-                    self.time_part = time1
-                if self.date_part.year == 1:
-                    continue
+                    finally:
+                        self.time_part = time1
                 self.datetime_whole = datetime.combine(self.date_part, self.time_part)
                 if self.start_date <= self.datetime_whole:
                     return log_position[1]
