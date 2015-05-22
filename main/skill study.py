@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date, time
 from collections import namedtuple
 import csv
 import sqlite3 as sql
@@ -57,11 +57,11 @@ class LogFile:
                 log_position.insert(0, fp.tell())
                 log_position = log_position[:2]
                 line = line.strip()
-                if date1 is None or date1 < self.start_date:
+                if date1 is None or date1 < self.start_date.date():
                     if 'Logging' in line[:7]:
                         date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
-                        if isinstance(date1, datetime):
-                            self.date_part = date1.date()
+                        if isinstance(date1, date):
+                            self.date_part = date1
                             continue
                 if self.date_part >= self.start_date.date():
                     try:
@@ -97,6 +97,8 @@ class UserData:
                 self.end_date = eval(data.value)
         # todo Need to add error messages for when a path doesn't exist or a datetime is invalid.
         self.sample_end = self.sample_start + minute_delta
+        print('event:{}\nskill:{}\nstart:{}\nend:{}'.format(self.event_path, self.skill_path, self.sample_start,
+                                                            self.sample_end))
 
     def increment_sample_window(self, minuets):
         """
