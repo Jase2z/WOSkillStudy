@@ -1,6 +1,7 @@
+import sys
 from datetime import datetime, timedelta, date, time
 from collections import namedtuple
-from bitstring import Bits
+from bitstring import Bits, pack
 import csv
 import sqlite3 as sql
 import re
@@ -22,8 +23,9 @@ class LogFile:
         self.datetime_whole = datetime
         self.line_list = list()
         self.start_date = ud_obj.sample_start
-        self.log_position = self.get_log_position()
         self.Line = namedtuple('Line', ['time', 'line'])
+        self.Time_stamp = namedtuple('Time_stamp', ['start', 'first', 'last', 'find'])
+        self.log_position = self.get_log_position()
 
     def __iter__(self):
         return
@@ -54,15 +56,72 @@ class LogFile:
         log_position = list()
         date1 = None
         with self.Path.open(mode="rb") as fp:
-            #todo using a text based opened files with readline and looking for "logging" is far too slow.
+            # todo using a text based opened files with readline and looking for "logging" is far too slow.
             # Going to work out a scheme using bitstrings to work with blocks of binary data.
-            j = Bits(b'Logging started')
-            p = Bits(fp)
-            s = list(p.findall(j, bytealigned=True))
-            print(s, len(s), sep='\n')
+            bit_fp = Bits(fp)
+            time_window_start = None
+            for bit_pos in list(bit_fp.findall(b'Logging started', bytealigned=True)):
+                log_splice = Bits(fp, length=80, offset=bit_pos + 128)
+                date1 = datetime.strptime(str(log_splice.tobytes(), encoding="utf-8"), "%Y-%m-%d").date()
+                # print('date: {}, type: {}'.format(date1, type(date1)))
+                if self.start_date.date() <= date1 and time_window_start is None:
+                    time_window_start = bit_pos + 224
+                    # 28 characters and each @ 8 bits. Example, "Logging started 2015-05-08/r/n"
+                if self.start_date.date() <= (date1 - timedelta(days=1)) and time_window_start is not None:
+                    time_window_end = bit_pos
+                    break
+            else:
+                time_window_end = len(bit_fp)
+            time_window = Bits(fp, offset=time_window_start, length=time_window_end - time_window_start)
+            first_time_stamp = datetime.strptime(str(time_window[0:80].tobytes(), encoding='utf8'),
+                                                 "[%H:%M:%S]").time()
+            result = time_window.rfind('0x5b', bytealigned=True)  # [ 0x5b, : 0x3a, ] 0x5d
+            if not result:
+                # todo Not sure what to do if result is false. It shouldn't happen but could.
+                exit()
+                pass
+            last_time_stamp = datetime.strptime(str(time_window[result[0]:result[0] + 80].tobytes(), encoding='utf8'),
+                                                "[%H:%M:%S]").time()
+            print('first: {}, last: {}, start: {}'.format(first_time_stamp, last_time_stamp, self.start_date.time()))
+
+            # all numbers in the log files are actually strings.
+            test = [self.Time_stamp(self.start_date.hour, first_time_stamp.hour, last_time_stamp.hour,
+                                    "Bits(b'[' + bytes(str(hour_find), encoding='utf8') + b':')"),
+                    self.Time_stamp(self.start_date.minute, first_time_stamp.minute, last_time_stamp.minute,
+                                    "Bits(b':' + bytes(str(hour_find), encoding='utf8') + b':')"),
+                    self.Time_stamp(self.start_date.second, first_time_stamp.second, last_time_stamp.second,
+                                    "Bits(b':' + bytes(str(hour_find), encoding='utf8') + b']')")]
+            test2 = ['time_window[result[0]:result[0] + 80]', 'time_window[result[0] - 24:result[0] + 56]',
+                     'time_window[result[0] - 48:result[0] + 32]']
+            window_start_offsets = [0, -24, -48]
+            for i in list(range(0, 3)):
+                for hour_find in list(range(test[i].start, test[i].first - 1, -1)):
+                    # Find the position for time_window_start. Acceptable outcomes is a range
+                    # where x is hour: self.start_date.hour >= x > first_time_stamp.hour().
+                    # On success break. Error if no hours match for the whole range.
+                    result = time_window.find(eval(test[i].find), bytealigned=True)
+                    if result:
+                        print('START -- time: {} pos: {} stamp: {}'.format(hour_find, result[0],
+                              time_window[result[0] + window_start_offsets[i]:result[0] + 80 + window_start_offsets[i]]
+                              .tobytes()))
+                        #time_window_start = result[0] + window_start_offsets[i]
+                        #time_window = Bits(fp, offset=time_window_start, length=time_window_end - time_window_start)
+                        break
+                for hour_find in list(range(test[i].start + 1, test[i].last + 1)):
+                    # Find the position for time_window_end. Acceptable outcomes is a range
+                    # whesre x is hour: self.start_date.hour >= x > first_time_stamp.hour().
+                    # On success break. Error if no hours match for the whole range.
+                    result = time_window.find(eval(test[i].find), bytealigned=True)
+                    if result:
+                        print('END -- time: {} pos: {} stamp: {}'.format(hour_find, result[0], time_window[result[0]:result[0] + 80].tobytes()))
+                        break
+
+            minute = self.start_date.minute
+            second = self.start_date.second
+            exit()
+
             log_position.insert(0, fp.tell())
             log_position = log_position[:2]
-            print(type(block), fp)
             if date1 is None or date1 < self.start_date.date():
                 if 'Logging' in line[:7]:
                     date1 = datetime.strptime(line[16:].strip(), "%Y-%m-%d").date()
@@ -102,8 +161,8 @@ class UserData:
                 self.end_date = eval(data.value)
         # todo Need to add error messages for when a path doesn't exist or a datetime is invalid.
         self.sample_end = self.sample_start + minute_delta
-        print('event:{}\nskill:{}\nstart:{}\nend:{}'.format(self.event_path, self.skill_path, self.sample_start,
-                                                            self.sample_end))
+        # print('event:{}\nskill:{}\nstart:{}\nend:{}'.format(self.event_path, self.skill_path, self.sample_start,
+        #                                                    self.sample_end))
 
     def increment_sample_window(self, minuets):
         """
